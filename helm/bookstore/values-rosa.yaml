@@ -1,0 +1,24 @@
+# Red Hat OpenShift Service on AWS (ROSA)
+#   helm upgrade --install bookstore ./helm/bookstore -n app1 --create-namespace -f ./helm/bookstore/values-rosa.yaml
+# aws-load-balancer-type: external needs the AWS Load Balancer Operator on the cluster.
+
+openshift:
+  enabled: true
+  legacyAppsAnyuid: true
+
+proxy:
+  fullnameOverride: stateless-app
+  service:
+    type: LoadBalancer
+    port: 6443
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: external
+      service.beta.kubernetes.io/aws-load-balancer-scheme: internal
+      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: instance
+      service.beta.kubernetes.io/aws-load-balancer-subnets: subnet-014457e386bc37967,subnet-082cbdbacc57804a4,subnet-0db5080066acfdf1d
+      service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: red-hat-managed=true
+      service.beta.kubernetes.io/aws-load-balancer-private-ipv4-addresses: "10.153.152.241,10.153.153.241,10.153.154.241"
+
+database:
+  persistence:
+    storageClass: gp3-csi

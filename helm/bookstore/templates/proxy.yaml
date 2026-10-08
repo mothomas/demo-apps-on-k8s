@@ -1,0 +1,149 @@
+{{- if .Values.proxy.enabled }}
+{{- $p := .Values.proxy }}
+{{- $ctx := dict "root" . "component" "proxy" }}
+{{- $name := include "bookstore.componentName" $ctx }}
+# NGINX reverse proxy - single entry point, exposed via LoadBalancer
+# (AWS NLB on EKS/ROSA, MetalLB on-prem). No Ingress controller / Route needed.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bookstore.componentLabels" $ctx | nindent 4 }}
+spec:
+  replicas: {{ $p.replicaCount }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      {{- include "bookstore.selectorLabels" $ctx | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        {{- include "bookstore.componentLabels" $ctx | nindent 8 }}
+        {{- with (merge (dict) $p.podLabels .Values.defaults.podLabels) }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        # Roll the pods whenever the routing config changes.
+        checksum/config: {{ include (print $.Template.BasePath "/proxy-configmap.yaml") . | sha256sum }}
+        {{- with (merge (dict) $p.podAnnotations .Values.defaults.podAnnotations) }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "bookstore.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- include "bookstore.imagePullSecrets" . | nindent 6 }}
+      {{- include "bookstore.podSecurityContext" (dict "root" . "ctx" $p.podSecurityContext "legacy" false) | nindent 6 }}
+      {{- if or $p.affinity .Values.defaults.affinity }}
+      {{- include "bookstore.scheduling" (dict "root" . "c" $p) | nindent 6 }}
+      {{- else }}
+      {{- include "bookstore.scheduling" (dict "root" . "c" (omit $p "affinity")) | nindent 6 }}
+      # Default: spread proxy replicas across nodes.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "bookstore.selectorLabels" $ctx | nindent 20 }}
+      {{- end }}
+      containers:
+        - name: nginx
+          image: {{ include "bookstore.image" (dict "root" . "image" $p.image) }}
+          imagePullPolicy: {{ $p.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ $p.containerPort }}
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          {{- with $p.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $p.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $p.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- include "bookstore.containerSecurityContext" (dict "root" . "ctx" $p.securityContext "legacy" false) | nindent 10 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bookstore.componentLabels" $ctx | nindent 4 }}
+    {{- with $p.service.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with $p.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $p.service.type }}
+  selector:
+    {{- include "bookstore.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: {{ $p.service.portName }}
+      port: {{ $p.service.port }}
+      targetPort: {{ $p.containerPort }}
+      protocol: TCP
+  {{- if eq $p.service.type "LoadBalancer" }}
+  {{- with $p.service.loadBalancerClass }}
+  loadBalancerClass: {{ . }}
+  {{- end }}
+  {{- with $p.service.loadBalancerIP }}
+  loadBalancerIP: {{ . }}
+  {{- end }}
+  {{- with $p.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if not (kindIs "invalid" $p.service.allocateLoadBalancerNodePorts) }}
+  allocateLoadBalancerNodePorts: {{ $p.service.allocateLoadBalancerNodePorts }}
+  {{- end }}
+  {{- end }}
+  {{- if and (has $p.service.type (list "LoadBalancer" "NodePort")) $p.service.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ $p.service.externalTrafficPolicy }}
+  {{- end }}
+{{- if and $p.podDisruptionBudget.enabled (gt (int $p.replicaCount) 1) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bookstore.componentLabels" $ctx | nindent 4 }}
+spec:
+  minAvailable: {{ $p.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "bookstore.selectorLabels" $ctx | nindent 6 }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,168 @@
+{{- if .Values.database.enabled }}
+{{- $db := .Values.database }}
+{{- $ctx := dict "root" . "component" "database" }}
+{{- $name := include "bookstore.componentName" $ctx }}
+{{- $secret := include "bookstore.db.secretName" . }}
+# Headless service - stable network identity for the StatefulSet pods
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-headless
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bookstore.componentLabels" $ctx | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "bookstore.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: mysql
+      port: {{ $db.service.port }}
+      targetPort: mysql
+---
+# Client service - this is DB_HOST for shopapi
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bookstore.componentLabels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "bookstore.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: mysql
+      port: {{ $db.service.port }}
+      targetPort: mysql
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bookstore.componentLabels" $ctx | nindent 4 }}
+spec:
+  serviceName: {{ $name }}-headless
+  replicas: 1
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "bookstore.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "bookstore.componentLabels" $ctx | nindent 8 }}
+        {{- with $db.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ $db.config | sha256sum }}
+        {{- with $db.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "bookstore.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      {{- include "bookstore.imagePullSecrets" . | nindent 6 }}
+      {{- include "bookstore.podSecurityContext" (dict "root" . "ctx" $db.podSecurityContext "legacy" false) | nindent 6 }}
+      {{- include "bookstore.scheduling" (dict "root" . "c" $db) | nindent 6 }}
+      containers:
+        - name: mysql
+          image: {{ include "bookstore.image" (dict "root" . "image" $db.image) }}
+          imagePullPolicy: {{ $db.image.pullPolicy }}
+          ports:
+            - name: mysql
+              containerPort: 3306
+              protocol: TCP
+          env:
+            - name: MYSQL_DATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ $name }}
+                  key: MYSQL_DATABASE
+            - name: MYSQL_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ $name }}
+                  key: MYSQL_USER
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: {{ $db.auth.secretKeys.userPassword }}
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: {{ $db.auth.secretKeys.rootPassword }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+            - name: config
+              mountPath: /etc/mysql/conf.d/bookstore.cnf
+              subPath: bookstore.cnf
+              readOnly: true
+            - name: run
+              mountPath: /var/run/mysqld
+            - name: tmp
+              mountPath: /tmp
+          {{- with $db.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $db.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $db.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- include "bookstore.containerSecurityContext" (dict "root" . "ctx" $db.securityContext "legacy" false) | nindent 10 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}
+            items:
+              - key: bookstore.cnf
+                path: bookstore.cnf
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        {{- if not $db.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+  {{- if $db.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "bookstore.selectorLabels" $ctx | nindent 10 }}
+        {{- with $db.persistence.annotations }}
+        annotations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      spec:
+        accessModes:
+          {{- toYaml $db.persistence.accessModes | nindent 10 }}
+        {{- if $db.persistence.storageClass }}
+        {{- if eq "-" $db.persistence.storageClass }}
+        storageClassName: ""
+        {{- else }}
+        storageClassName: {{ $db.persistence.storageClass | quote }}
+        {{- end }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $db.persistence.size }}
+  {{- end }}
+{{- end }}

@@ -1,0 +1,19 @@
+{{- if .Values.database.enabled }}
+{{- $db := .Values.database }}
+{{- $ctx := dict "root" . "component" "database" }}
+{{- $name := include "bookstore.componentName" $ctx }}
+{{- $secret := include "bookstore.db.secretName" . }}
+# MySQL config (my.cnf fragment + non-secret env)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bookstore.componentLabels" $ctx | nindent 4 }}
+data:
+  MYSQL_DATABASE: {{ $db.auth.database | quote }}
+  MYSQL_USER: {{ $db.auth.username | quote }}
+  bookstore.cnf: |
+    {{- $db.config | nindent 4 }}
+{{- end }}

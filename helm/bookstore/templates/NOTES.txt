@@ -1,0 +1,30 @@
+BookStore deployed to namespace "{{ .Release.Namespace }}".
+{{- if .Values.proxy.enabled }}
+{{- $svc := include "bookstore.componentName" (dict "root" . "component" "proxy") }}
+
+Entry point: NGINX proxy Service "{{ $svc }}" ({{ .Values.proxy.service.type }}, port {{ .Values.proxy.service.port }})
+
+  kubectl -n {{ .Release.Namespace }} get svc {{ $svc }} -w
+
+Once EXTERNAL-IP / hostname is assigned:
+
+  LB=$(kubectl -n {{ .Release.Namespace }} get svc {{ $svc }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}{.status.loadBalancer.ingress[0].hostname}')
+  curl http://$LB:{{ .Values.proxy.service.port }}/            # website
+  curl http://$LB:{{ .Values.proxy.service.port }}/shop        # shopui
+  curl http://$LB:{{ .Values.proxy.service.port }}/api/books   # shopapi
+
+Routes:
+{{- range .Values.proxy.routes }}
+  {{ .path | printf "%-8s" }} -> {{ default .upstream .component }}
+{{- end }}
+{{- end }}
+{{- if and .Values.database.enabled (not .Values.database.auth.existingSecret) (not .Values.database.auth.password) }}
+
+DB passwords were auto-generated into Secret "{{ include "bookstore.db.secretName" . }}" (kept on uninstall).
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "bookstore.db.secretName" . }} -o jsonpath='{.data.{{ .Values.database.auth.secretKeys.userPassword }}}' | base64 -d
+{{- end }}
+{{- if not .Values.shopapi.seed.enabled }}
+
+Seed demo data (one-off):
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "bookstore.componentName" (dict "root" . "component" "shopapi") }} -- bundle exec rails db:seed
+{{- end }}

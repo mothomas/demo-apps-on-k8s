@@ -1,0 +1,24 @@
+# Amazon EKS
+#   helm upgrade --install bookstore ./helm/bookstore -n app1 --create-namespace -f ./helm/bookstore/values-eks.yaml
+# Requires the AWS Load Balancer Controller (aws-load-balancer-type: external).
+
+openshift:
+  enabled: false
+
+proxy:
+  fullnameOverride: stateless-app
+  service:
+    type: LoadBalancer
+    port: 6443
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: external
+      service.beta.kubernetes.io/aws-load-balancer-scheme: internal
+      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: instance
+      # Replace with the private subnets / IPs of THIS cluster's VPC.
+      service.beta.kubernetes.io/aws-load-balancer-subnets: subnet-014457e386bc37967,subnet-082cbdbacc57804a4,subnet-0db5080066acfdf1d
+      service.beta.kubernetes.io/aws-load-balancer-private-ipv4-addresses: "10.153.152.241,10.153.153.241,10.153.154.241"
+
+database:
+  persistence:
+    # EBS CSI driver class; "" = cluster default.
+    storageClass: gp3

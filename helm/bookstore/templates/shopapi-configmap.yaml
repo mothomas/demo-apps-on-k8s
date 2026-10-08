@@ -1,0 +1,19 @@
+{{- if .Values.shopapi.enabled }}
+{{- $ctx := dict "root" . "component" "shopapi" }}
+# Replaces services/shopapi/config.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "bookstore.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bookstore.componentLabels" $ctx | nindent 4 }}
+data:
+  DB_HOST: {{ include "bookstore.db.host" . | quote }}
+  DB_PORT: {{ include "bookstore.db.port" . | quote }}
+  DB_NAME: {{ include "bookstore.db.name" . | quote }}
+  DB_USER: {{ include "bookstore.db.user" . | quote }}
+  {{- range $k, $v := .Values.shopapi.config }}
+  {{ $k }}: {{ $v | toString | quote }}
+  {{- end }}
+{{- end }}

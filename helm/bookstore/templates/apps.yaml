@@ -1,0 +1,127 @@
+{{- /*
+Deployments + ClusterIP Services for the three application components.
+Replaces services/{website,shopui,shopapi}/{deploy,service}.yaml
+*/ -}}
+{{- range $component := list "website" "shopui" "shopapi" }}
+{{- $c := index $.Values $component }}
+{{- if $c.enabled }}
+{{- $ctx := dict "root" $ "component" $component }}
+{{- $name := include "bookstore.componentName" $ctx }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "bookstore.componentLabels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "bookstore.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ $c.service.port }}
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "bookstore.componentLabels" $ctx | nindent 4 }}
+spec:
+  replicas: {{ $c.replicaCount }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      {{- include "bookstore.selectorLabels" $ctx | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        {{- include "bookstore.componentLabels" $ctx | nindent 8 }}
+        {{- if eq $component "shopapi" }}
+        bookstore.io/db-client: "true"
+        {{- end }}
+        {{- with (merge (dict) $c.podLabels $.Values.defaults.podLabels) }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        {{- if eq $component "shopapi" }}
+        checksum/config: {{ include (print $.Template.BasePath "/shopapi-configmap.yaml") $ | sha256sum }}
+        {{- end }}
+        {{- with (merge (dict) $c.podAnnotations $.Values.defaults.podAnnotations) }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "bookstore.legacyServiceAccountName" $ }}
+      automountServiceAccountToken: false
+      {{- include "bookstore.imagePullSecrets" $ | nindent 6 }}
+      {{- include "bookstore.podSecurityContext" (dict "root" $ "ctx" $c.podSecurityContext "legacy" true) | nindent 6 }}
+      {{- include "bookstore.scheduling" (dict "root" $ "c" $c) | nindent 6 }}
+      {{- if and (eq $component "shopapi") $c.waitForDatabase }}
+      initContainers:
+        {{- include "bookstore.waitForDb" $ | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $component }}
+          image: {{ include "bookstore.image" (dict "root" $ "image" $c.image) }}
+          imagePullPolicy: {{ $c.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ $c.containerPort }}
+              protocol: TCP
+          {{- if eq $component "shopapi" }}
+          envFrom:
+            - configMapRef:
+                name: {{ $name }}
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "bookstore.db.secretName" $ }}
+                  key: {{ include "bookstore.db.userPasswordKey" $ }}
+            {{- with $c.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: db-secret
+              mountPath: {{ $c.secretMountPath }}
+              readOnly: true
+          {{- else }}
+          {{- with $c.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- end }}
+          {{- with $c.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $c.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $c.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- include "bookstore.containerSecurityContext" (dict "root" $ "ctx" $c.securityContext "legacy" true) | nindent 10 }}
+      {{- if eq $component "shopapi" }}
+      volumes:
+        - name: db-secret
+          secret:
+            secretName: {{ include "bookstore.db.secretName" $ }}
+            items:
+              - key: {{ include "bookstore.db.userPasswordKey" $ }}
+                path: DB_PASSWORD
+      {{- end }}
+{{- end }}
+{{- end }}

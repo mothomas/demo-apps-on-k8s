@@ -1,0 +1,18 @@
+apiVersion: v2
+name: bookstore
+description: >-
+  BookStore demo micro-services (website, shopui, shopapi) with an in-cluster
+  MySQL StatefulSet and a bundled NGINX reverse proxy that replaces the
+  Ingress/Route layer. Portable across EKS, ROSA and on-prem OpenShift (MetalLB).
+type: application
+version: 1.0.0
+appVersion: "1.0"
+kubeVersion: ">=1.23.0-0"
+keywords:
+  - bookstore
+  - nginx
+  - mysql
+  - openshift
+  - eks
+sources:
+  - https://github.com/mothomas/demo-apps-on-k8s

@@ -49,7 +49,23 @@ open http://localhost
 **Note:** You may change the port mapping if port 80 is taken on dev machine
 
 
-## On Kubernetes
+## Deploy with Helm (EKS / ROSA / on-prem OpenShift)
+
+The whole stack is a single Helm chart at [`helm/bookstore`](helm/bookstore/README.md). It includes website, shopui, shopapi, a MySQL StatefulSet, the DB migration Job and an NGINX reverse proxy.
+The Ingress controller and the Ingress/Route objects are gone. NGINX routes `/`, `/shop` and `/api` from a ConfigMap and is exposed by a `LoadBalancer` Service: an AWS NLB on EKS/ROSA, MetalLB on-prem.
+
+```
+# EKS
+helm upgrade --install bookstore ./helm/bookstore -n app1 --create-namespace -f ./helm/bookstore/values-eks.yaml
+# ROSA
+helm upgrade --install bookstore ./helm/bookstore -n app1 --create-namespace -f ./helm/bookstore/values-rosa.yaml
+# On-prem OCP + MetalLB
+helm upgrade --install bookstore ./helm/bookstore -n app1 --create-namespace -f ./helm/bookstore/values-ocp-metallb.yaml
+```
+
+The raw manifests under `services/` and the steps below are kept for reference and learning.
+
+## On Kubernetes (manual, step by step)
 
 Create Kubernetes cluster on DigitalOcean
 
@@ -190,58 +206,6 @@ kubectl get svc -l app=shopui
 
 You may verify using port forward but let's to integrated test using ingress
 
-### Ingress Controller
+### Entry point (NGINX proxy)
 
-****Install controller:** install Ingress controller
-
-```
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/nginx-0.26.1/deploy/static/mandatory.yaml
-```
-
-Create loadbalancer services which will create LB instance on DigitialOcean and route http/https traffic to the ingress controller pod created above.
-
-```
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/nginx-0.26.1/deploy/static/provider/cloud-generic.yaml
-```
-
-Verify
-
-```
-kubectl get pods --all-namespaces -l app.kubernetes.io/name=ingress-nginx
-kubectl get svc --namespace=ingress-nginx
-```
-
-Runs a service and triggers a new loadbalancer IP of which will be assigned to this service as an external IP. Notice the type of this service is LoadBalancer.
-
-Give it a minute or so and try again,
-
-```
-kubectl get svc/ingress-nginx -n ingress-nginx
-
-NAME            TYPE           CLUSTER-IP       EXTERNAL-IP         PORT(S)                      AGE
-ingress-nginx   LoadBalancer   10.245.203.250   <LoadBalancer IP>   80:31323/TCP,443:32325/TCP   2m
-```
-
-Verify the loadbalancer on Cloud provider web console. On Digital Ocean, under `Networking > Loadbalancers`. 
-
-## Ingress resource
-
-Ingress resource is where we define the routing requirments and rules
-
-
-```
-kubectl apply -f route/ingress.yaml
-kubectl get ing
-```
-
-```
-LB_IP=$(kubectl get svc/ingress-nginx -n ingress-nginx | grep ingress | awk '{print $4}')
-echo $LB_IP
-
-# website
-open http://$LB_IP
-
-# shopapi
-open http://$LB_IP/api/books
-open http://$LB_IP/api/books/1
-```
+The original Ingress controller + `route/ingress.yaml` setup has been replaced by the chart's NGINX reverse proxy. Its routing lives in `proxy.routes` in `helm/bookstore/values.yaml`. See [Deploy with Helm](#deploy-with-helm-eks--rosa--on-prem-openshift).

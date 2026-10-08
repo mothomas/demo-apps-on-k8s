@@ -1,0 +1,21 @@
+# On-prem OpenShift Container Platform with MetalLB
+#   helm upgrade --install bookstore ./helm/bookstore -n app1 --create-namespace -f ./helm/bookstore/values-ocp-metallb.yaml
+
+openshift:
+  enabled: true
+  legacyAppsAnyuid: true
+
+proxy:
+  fullnameOverride: stateless-app
+  service:
+    type: LoadBalancer
+    port: 8080
+    allocateLoadBalancerNodePorts: true
+    annotations:
+      metallb.io/address-pool: vrf-np-oss-pool-ipv4
+      metallb.io/loadBalancerIPs: 10.106.5.136
+
+database:
+  persistence:
+    # "" = cluster default (e.g. ODF ocs-storagecluster-ceph-rbd, Trident, vSphere CSI).
+    storageClass: ""

@@ -1,0 +1,88 @@
+{{- /*
+DB migration (every install/upgrade) and optional seed (first install only).
+Replaces services/shopapi/job-dbc.yaml. Runs as Helm hooks; Argo CD maps these
+to PostSync hooks automatically.
+*/ -}}
+{{- if .Values.shopapi.enabled }}
+{{- $c := .Values.shopapi }}
+{{- $base := include "bookstore.componentName" (dict "root" . "component" "shopapi") }}
+{{- $jobs := list }}
+{{- if $c.migration.enabled }}
+{{- $jobs = append $jobs (dict "suffix" "db-migrate" "hook" "post-install,post-upgrade" "weight" "0" "spec" $c.migration) }}
+{{- end }}
+{{- if $c.seed.enabled }}
+{{- $jobs = append $jobs (dict "suffix" "db-seed" "hook" "post-install" "weight" "10" "spec" $c.seed) }}
+{{- end }}
+{{- range $job := $jobs }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-%s" $base $job.suffix | trunc 63 | trimSuffix "-" }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "bookstore.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ printf "shopapi-%s" $job.suffix }}
+  annotations:
+    helm.sh/hook: {{ $job.hook }}
+    helm.sh/hook-weight: {{ $job.weight | quote }}
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ $job.spec.backoffLimit | default 4 }}
+  {{- with $job.spec.activeDeadlineSeconds }}
+  activeDeadlineSeconds: {{ . }}
+  {{- end }}
+  {{- with $job.spec.ttlSecondsAfterFinished }}
+  ttlSecondsAfterFinished: {{ . }}
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "bookstore.labels" $ | nindent 8 }}
+        app.kubernetes.io/component: {{ printf "shopapi-%s" $job.suffix }}
+        bookstore.io/db-client: "true"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "bookstore.legacyServiceAccountName" $ }}
+      automountServiceAccountToken: false
+      {{- include "bookstore.imagePullSecrets" $ | nindent 6 }}
+      {{- include "bookstore.podSecurityContext" (dict "root" $ "ctx" $c.podSecurityContext "legacy" true) | nindent 6 }}
+      {{- include "bookstore.scheduling" (dict "root" $ "c" $c) | nindent 6 }}
+      initContainers:
+        {{- include "bookstore.waitForDb" $ | nindent 8 }}
+      containers:
+        - name: {{ $job.suffix }}
+          image: {{ include "bookstore.image" (dict "root" $ "image" $c.image) }}
+          imagePullPolicy: {{ $c.image.pullPolicy }}
+          command:
+            {{- toYaml $job.spec.command | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ $base }}
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "bookstore.db.secretName" $ }}
+                  key: {{ include "bookstore.db.userPasswordKey" $ }}
+            {{- with $c.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: db-secret
+              mountPath: {{ $c.secretMountPath }}
+              readOnly: true
+          {{- with $c.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- include "bookstore.containerSecurityContext" (dict "root" $ "ctx" $c.securityContext "legacy" true) | nindent 10 }}
+      volumes:
+        - name: db-secret
+          secret:
+            secretName: {{ include "bookstore.db.secretName" $ }}
+            items:
+              - key: {{ include "bookstore.db.userPasswordKey" $ }}
+                path: DB_PASSWORD
+{{- end }}
+{{- end }}
