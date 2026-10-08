@@ -1,0 +1,9 @@
+# Lets Placements in openshift-gitops select clusters from the "global" ClusterSet
+# (every managed cluster belongs to it). Swap for a narrower ClusterSet if you have one.
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: global
+  namespace: openshift-gitops
+spec:
+  clusterSet: global

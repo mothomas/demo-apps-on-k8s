@@ -1,0 +1,72 @@
+# One bookstore Application per ACM-managed cluster. The values file comes from the
+# cluster's ACM labels:
+#
+#   vendor=EKS                                   -> values-eks.yaml
+#   vendor=OpenShift, cloud=Amazon               -> values-rosa.yaml
+#   vendor=OpenShift, cloud not a public cloud   -> values-ocp-metallb.yaml
+#
+# The three generators match disjoint label sets, so a cluster lands in exactly one.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: bookstore
+  namespace: openshift-gitops
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            apps.open-cluster-management.io/acm-cluster: "true"
+            vendor: EKS
+        values:
+          valuesFile: values-eks.yaml
+          platform: eks
+    - clusters:
+        selector:
+          matchLabels:
+            apps.open-cluster-management.io/acm-cluster: "true"
+            vendor: OpenShift
+            cloud: Amazon
+        values:
+          valuesFile: values-rosa.yaml
+          platform: rosa
+    - clusters:
+        selector:
+          matchLabels:
+            apps.open-cluster-management.io/acm-cluster: "true"
+            vendor: OpenShift
+          matchExpressions:
+            - key: cloud
+              operator: NotIn
+              values: [Amazon, Azure, Google, IBM]
+        values:
+          valuesFile: values-ocp-metallb.yaml
+          platform: ocp-metallb
+  template:
+    metadata:
+      name: 'bookstore-{{.name}}'
+      labels:
+        app.kubernetes.io/part-of: bookstore
+        bookstore/platform: '{{.values.platform}}'
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/mothomas/demo-apps-on-k8s.git
+        targetRevision: master
+        path: helm/bookstore
+        helm:
+          releaseName: bookstore
+          valueFiles:
+            - values.yaml
+            - '{{.values.valuesFile}}'
+      destination:
+        server: '{{.server}}'
+        namespace: app1
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

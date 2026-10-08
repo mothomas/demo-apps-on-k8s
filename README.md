@@ -63,6 +63,10 @@ helm upgrade --install bookstore ./helm/bookstore -n app1 --create-namespace -f 
 helm upgrade --install bookstore ./helm/bookstore -n app1 --create-namespace -f ./helm/bookstore/values-ocp-metallb.yaml
 ```
 
+### Multi-cluster with ACM + Argo CD
+
+`argocd/` has an ApplicationSet that deploys the chart to every ACM-managed EKS/ROSA/on-prem OCP cluster and picks the values file from the cluster's ACM `vendor`/`cloud` labels. See [argocd/README.md](gitops/acm/README.md).
+
 The raw manifests under `services/` and the steps below are kept for reference and learning.
 
 ## On Kubernetes (manual, step by step)

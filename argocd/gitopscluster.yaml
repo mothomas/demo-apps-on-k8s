@@ -1,0 +1,16 @@
+# Registers every cluster chosen by the "bookstore" Placement in the openshift-gitops
+# Argo CD instance. Each Argo CD cluster secret carries the ManagedCluster labels
+# (vendor, cloud, ...), which the ApplicationSet uses to pick the values file.
+apiVersion: apps.open-cluster-management.io/v1beta1
+kind: GitOpsCluster
+metadata:
+  name: bookstore
+  namespace: openshift-gitops
+spec:
+  argoServer:
+    cluster: local-cluster
+    argoNamespace: openshift-gitops
+  placementRef:
+    kind: Placement
+    apiVersion: cluster.open-cluster-management.io/v1beta1
+    name: bookstore
