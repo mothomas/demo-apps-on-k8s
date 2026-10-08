@@ -4,6 +4,7 @@
 #   values-eks.yaml          -> Amazon EKS (AWS Load Balancer Controller, NLB)
 #   values-rosa.yaml         -> Red Hat OpenShift Service on AWS (NLB)
 #   values-ocp-metallb.yaml  -> On-prem OpenShift with MetalLB
+#   values-<cluster>.yaml    -> per-cluster file used by argocd/applicationset.yaml
 # =============================================================================
 
 nameOverride: ""

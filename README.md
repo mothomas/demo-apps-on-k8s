@@ -65,7 +65,7 @@ helm upgrade --install bookstore ./helm/bookstore -n app1 --create-namespace -f 
 
 ### Multi-cluster with ACM + Argo CD
 
-`argocd/` has an ApplicationSet that deploys the chart to every ACM-managed EKS/ROSA/on-prem OCP cluster and picks the values file from the cluster's ACM `vendor`/`cloud` labels. See [argocd/README.md](argocd/README.md).
+`argocd/` has an ACM pull-model ApplicationSet: label a managed cluster `bookstore=true` and it gets the chart with `helm/bookstore/values-<cluster-name>.yaml`. See [argocd/README.md](argocd/README.md).
 
 The raw manifests under `services/` and the steps below are kept for reference and learning.
 

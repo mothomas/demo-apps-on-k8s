@@ -1,72 +1,65 @@
-# One bookstore Application per ACM-managed cluster. The values file comes from the
-# cluster's ACM labels:
+# ACM pull model: one Application per cluster selected by placement-bookstore,
+# created on the managed cluster and synced by that cluster's own Argo CD.
 #
-#   vendor=EKS                                   -> values-eks.yaml
-#   vendor=OpenShift, cloud=Amazon               -> values-rosa.yaml
-#   vendor=OpenShift, cloud not a public cloud   -> values-ocp-metallb.yaml
-#
-# The three generators match disjoint label sets, so a cluster lands in exactly one.
+# Helm values: values.yaml + values-<cluster-name>.yaml from helm/bookstore/.
+# Each target cluster needs its own values-<cluster-name>.yaml (NLB subnets/IPs,
+# MetalLB IP, storageClass, DB secret, ...); copy values-eks/-rosa/-ocp-metallb.yaml
+# as a starting point. A missing file fails the sync instead of deploying defaults.
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
-  name: bookstore
+  name: bookstore-pull-model
   namespace: openshift-gitops
 spec:
-  goTemplate: true
-  goTemplateOptions: ["missingkey=error"]
   generators:
-    - clusters:
-        selector:
-          matchLabels:
-            apps.open-cluster-management.io/acm-cluster: "true"
-            vendor: EKS
-        values:
-          valuesFile: values-eks.yaml
-          platform: eks
-    - clusters:
-        selector:
-          matchLabels:
-            apps.open-cluster-management.io/acm-cluster: "true"
-            vendor: OpenShift
-            cloud: Amazon
-        values:
-          valuesFile: values-rosa.yaml
-          platform: rosa
-    - clusters:
-        selector:
-          matchLabels:
-            apps.open-cluster-management.io/acm-cluster: "true"
-            vendor: OpenShift
-          matchExpressions:
-            - key: cloud
-              operator: NotIn
-              values: [Amazon, Azure, Google, IBM]
-        values:
-          valuesFile: values-ocp-metallb.yaml
-          platform: ocp-metallb
+    - matrix:
+        generators:
+          - list:
+              elements:
+                - appName: bookstore
+                  namespace: app1
+                  chartPath: helm/bookstore
+          - clusterDecisionResource:
+              configMapRef: acm-placement
+              labelSelector:
+                matchLabels:
+                  cluster.open-cluster-management.io/placement: placement-bookstore
+              requeueAfterSeconds: 180
   template:
     metadata:
-      name: 'bookstore-{{.name}}'
+      annotations:
+        apps.open-cluster-management.io/ocm-managed-cluster: '{{name}}'
+        apps.open-cluster-management.io/ocm-managed-cluster-app-namespace: openshift-gitops
+        argocd.argoproj.io/skip-reconcile: 'true'
       labels:
-        app.kubernetes.io/part-of: bookstore
-        bookstore/platform: '{{.values.platform}}'
+        apps.open-cluster-management.io/pull-to-ocm-managed-cluster: 'true'
+      name: '{{appName}}-{{name}}'
     spec:
+      destination:
+        namespace: '{{namespace}}'
+        server: 'https://kubernetes.default.svc'
       project: default
       source:
-        repoURL: https://github.com/mothomas/demo-apps-on-k8s.git
+        repoURL: 'https://github.com/mothomas/demo-apps-on-k8s.git'
         targetRevision: master
-        path: helm/bookstore
+        path: '{{chartPath}}'
         helm:
-          releaseName: bookstore
+          releaseName: '{{appName}}'
           valueFiles:
             - values.yaml
-            - '{{.values.valuesFile}}'
-      destination:
-        server: '{{.server}}'
-        namespace: app1
+            - 'values-{{name}}.yaml'
       syncPolicy:
         automated:
           prune: true
           selfHeal: true
+        managedNamespaceMetadata:
+          labels:
+            argocd.argoproj.io/managed-by: openshift-gitops
+        retry:
+          backoff:
+            duration: 10s
+            factor: 2
+            maxDuration: 3m
+          limit: 5
         syncOptions:
           - CreateNamespace=true

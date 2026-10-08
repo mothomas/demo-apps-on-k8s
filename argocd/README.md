@@ -1,6 +1,6 @@
-# Bookstore via ACM + OpenShift GitOps
+# Bookstore via ACM + OpenShift GitOps (pull model)
 
-Apply on the ACM hub (OpenShift GitOps installed in `openshift-gitops`):
+Apply on the ACM hub:
 
 ```
 oc apply -k argocd
@@ -9,28 +9,27 @@ oc apply -k argocd
 | File | Purpose |
 |---|---|
 | `managedclustersetbinding.yaml` | Binds the `global` ClusterSet into `openshift-gitops` |
-| `placement.yaml` | Picks managed clusters with `vendor` in `OpenShift`/`EKS` (excludes `local-cluster`) |
-| `gitopscluster.yaml` | Registers those clusters in Argo CD; cluster secrets inherit the ManagedCluster labels |
-| `applicationset.yaml` | One `bookstore-<cluster>` app per cluster, values file chosen from labels |
+| `placement.yaml` | `placement-bookstore`: managed clusters labelled `bookstore=true` |
+| `gitopscluster.yaml` | Registers those clusters with the hub Argo CD |
+| `applicationset.yaml` | One `bookstore-<cluster>` Application per selected cluster, pulled and synced by the cluster's own Argo CD |
 
-Values file selection (ACM sets `vendor` and `cloud` automatically):
+## Add a cluster
 
-| `vendor` | `cloud` | Values file |
-|---|---|---|
-| `EKS` | any | `values-eks.yaml` |
-| `OpenShift` | `Amazon` | `values-rosa.yaml` |
-| `OpenShift` | not `Amazon`/`Azure`/`Google`/`IBM` (e.g. `BareMetal`, `VSphere`, `Other`) | `values-ocp-metallb.yaml` |
+1. Create `helm/bookstore/values-<cluster-name>.yaml` (the ManagedCluster name). Copy the closest
+   platform file (`values-eks.yaml`, `values-rosa.yaml`, `values-ocp-metallb.yaml`) and set that
+   cluster's subnets / IPs / storageClass. Commit and push.
+2. Label the cluster:
+   ```
+   oc label managedcluster <cluster-name> bookstore=true
+   ```
 
-Check what a cluster will get:
+Argo CD renders the chart with `values.yaml` then `values-<cluster-name>.yaml`. If the per-cluster
+file is missing the sync fails rather than deploying defaults.
 
-```
-oc get managedclusters -L vendor,cloud
-oc get secret -n openshift-gitops -l apps.open-cluster-management.io/acm-cluster=true --show-labels
-oc get applications -n openshift-gitops -l app.kubernetes.io/part-of=bookstore -L bookstore/platform
-```
+Remove the label to remove the app from that cluster.
 
-Notes:
-- The values files hold per-cluster subnets / IPs (NLB subnets, MetalLB IP). With more than one cluster
-  per platform, move those into a per-cluster file or override them in the ApplicationSet.
-- Set `database.auth.existingSecret` (or fixed passwords) for GitOps: Helm `lookup` doesn't run under
-  Argo CD, so the generated DB password would change on every sync.
+## Notes
+- Set `database.auth.existingSecret` (or fixed passwords) in each cluster file: Helm `lookup` doesn't
+  run under Argo CD, so a generated DB password would change on every sync.
+- The pull model needs OpenShift GitOps on each managed cluster and the ACM Argo CD pull integration
+  enabled (the same setup your existing `aws-poc-pull-model-apps` ApplicationSet uses).

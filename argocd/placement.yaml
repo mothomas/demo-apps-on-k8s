@@ -1,9 +1,9 @@
-# Clusters that can run the bookstore chart: EKS and OpenShift (ROSA or on-prem).
-# ACM sets the "vendor" and "cloud" labels on every ManagedCluster automatically.
+# Clusters that get the bookstore app. Opt a cluster in with:
+#   oc label managedcluster <cluster-name> bookstore=true
 apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
 metadata:
-  name: bookstore
+  name: placement-bookstore
   namespace: openshift-gitops
 spec:
   clusterSets:
@@ -11,10 +11,10 @@ spec:
   predicates:
     - requiredClusterSelector:
         labelSelector:
-          matchExpressions:
-            - key: vendor
-              operator: In
-              values: [OpenShift, EKS]
-            - key: name
-              operator: NotIn
-              values: [local-cluster]
+          matchLabels:
+            bookstore: "true"
+  tolerations:
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
+    - key: cluster.open-cluster-management.io/unavailable
+      operator: Exists
